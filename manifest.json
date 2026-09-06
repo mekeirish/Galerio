@@ -1,14 +1,15 @@
 {
-  "name": "Galerio",
-  "short_name": "Galerio",
+  "name": "Souvenirs Temporels",
+  "short_name": "Souvenirs",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#1a1c20",
-  "theme_color": "#4b6cb7",
+  "background_color": "#0b1120",
+  "theme_color": "#1e293b",
+  "orientation": "portrait",
   "icons": [
     {
       "src": "icon.png",
-      "sizes": "512x512",
+      "sizes": "192x192 512x512",
       "type": "image/png",
       "purpose": "any maskable"
     }
