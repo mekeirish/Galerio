@@ -29,7 +29,8 @@ jobs:
           rsync -av --exclude='capacitor-app' --exclude='.git' --exclude='.github' ./ capacitor-app/www/
           cd capacitor-app
           npm init -y
-          npm install @capacitor/core @capacitor/android @capacitor/haptics @capacitor/local-notifications
+          # 🟢 AJOUT : @capacitor-community/media inclus ici
+          npm install @capacitor/core @capacitor/android @capacitor/haptics @capacitor/local-notifications @capacitor-community/media
           npm install -D @capacitor/cli
           cat > capacitor.config.json << JSONEOF
           {
@@ -61,6 +62,13 @@ jobs:
           
           add_permission "INTERNET"
           add_permission "ACCESS_NETWORK_STATE"
+
+          # 🟢 AJOUT : Détection du plugin Media pour les permissions Galerie (Android 12 et 13+)
+          if grep -rq -E "Capacitor\.Plugins\.Media|getMedias" .; then
+            add_permission "READ_EXTERNAL_STORAGE"
+            add_permission "READ_MEDIA_IMAGES"
+            echo "   (détecté: Plugin Capacitor Media utilisé pour la Galerie)"
+          fi
           
           if grep -rq -E "passerAppelDirect" .; then
             add_permission "CALL_PHONE"
@@ -131,19 +139,17 @@ jobs:
               public void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
 
-                  // 1. Injection immédiate de l'interface JavaScript
                   WebView webView = this.bridge.getWebView();
                   webView.addJavascriptInterface(new Object() {
                       @android.webkit.JavascriptInterface
                       public void passerAppelDirect(String phone) {
-                          // Vérifier la permission à l'exécution
                           if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CALL_PHONE)
                                   != PackageManager.PERMISSION_GRANTED) {
                               Log.w(TAG, "CALL_PHONE permission non accordée, demande en cours...");
                               ActivityCompat.requestPermissions(MainActivity.this,
                                       new String[]{Manifest.permission.CALL_PHONE},
                                       REQUEST_CALL_PHONE);
-                              return; // La fonction sera réappelée après l'octroi
+                              return;
                           }
                           try {
                               Intent intent = new Intent(Intent.ACTION_CALL);
@@ -155,12 +161,10 @@ jobs:
                       }
                   }, "AndroidBridge");
 
-                  // 2. WebViewClient pour garantir que l'interface est attachée avant l'exécution du JS
                   webView.setWebViewClient(new WebViewClient() {
                       @Override
                       public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                           super.onPageStarted(view, url, favicon);
-                          // Réinjection au cas où le timing précédent aurait échoué
                           view.addJavascriptInterface(new Object() {
                               @android.webkit.JavascriptInterface
                               public void passerAppelDirect(String phone) {
@@ -181,7 +185,6 @@ jobs:
                                   }
                               }
                           }, "AndroidBridge");
-                          // Supprimer le client pour ne pas le réexécuter sur les pages suivantes
                           view.setWebViewClient(null);
                       }
                   });
@@ -200,9 +203,9 @@ jobs:
               }
           }
           EOF
-            echo "✅ MainActivity.java modifiée avec succès (timing + permission runtime)"
+            echo "✅ MainActivity.java modifiée avec succès"
           else
-            echo "ℹ️ Pas besoin de modifier MainActivity.java (aucun appel direct détecté)"
+            echo "ℹ️ Pas besoin de modifier MainActivity.java"
           fi
 
       - name: 🌉 Injection des shims JS-vers-natif
@@ -315,24 +318,20 @@ jobs:
               let parts = content.split(/<\/body>/i);
               if (parts.length > 1) {
                 let lastPart = parts.pop();
-                let scripts = '<script src="capacitor.js"><\/script>\n';
+                let scripts = '<script src=\"capacitor.js\"><\/script>\n';
                 if (fs.existsSync('shims.js')) {
-                  scripts += '<script src="shims.js"><\/script>\n';
+                  scripts += '<script src=\"shims.js\"><\/script>\n';
                 }
-                scripts += '<script src="bridge.js"><\/script>\n</body>';
-                let newContent = parts.join('</body>') + scripts + lastPart;
+                scripts += '<script src=\"bridge.js\"><\/script>\n<\/body>';
+                let newContent = parts.join('<\/body>') + scripts + lastPart;
                 fs.writeFileSync(htmlFile, newContent, 'utf8');
                 console.log('✅ Bridge injecté chirurgicalement');
-                if (fs.existsSync('shims.js')) {
-                  console.log('✅ shims.js également injecté');
-                }
               } else {
-                console.log('⚠️ Aucun </body> trouvé, injection à la fin');
-                let append = '<script src="capacitor.js"><\/script>\n';
+                let append = '<script src=\"capacitor.js\"><\/script>\n';
                 if (fs.existsSync('shims.js')) {
-                  append += '<script src="shims.js"><\/script>\n';
+                  append += '<script src=\"shims.js\"><\/script>\n';
                 }
-                append += '<script src="bridge.js"><\/script>\n';
+                append += '<script src=\"bridge.js\"><\/script>\n';
                 fs.appendFileSync(htmlFile, append);
               }
             "
