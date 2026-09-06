@@ -245,6 +245,58 @@ jobs:
           (function() {
             var Capacitor = window.Capacitor;
             if (Capacitor && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
+              // Gestion de la permission pour Android 13+
+              var permissionStatus = 'default';
+              var pendingNotifications = [];
+
+              function requestPermissionIfNeeded() {
+                return new Promise(function(resolve) {
+                  if (permissionStatus === 'granted') {
+                    resolve('granted');
+                    return;
+                  }
+                  if (permissionStatus === 'denied') {
+                    resolve('denied');
+                    return;
+                  }
+                  Capacitor.Plugins.LocalNotifications.requestPermissions().then(function(result) {
+                    if (result.display === 'granted') {
+                      permissionStatus = 'granted';
+                      // Traiter les notifications en attente
+                      pendingNotifications.forEach(function(item) {
+                        scheduleNotification(item.title, item.options, item.id);
+                      });
+                      pendingNotifications = [];
+                      resolve('granted');
+                    } else {
+                      permissionStatus = 'denied';
+                      resolve('denied');
+                    }
+                  }).catch(function() {
+                    permissionStatus = 'denied';
+                    resolve('denied');
+                  });
+                });
+              }
+
+              function scheduleNotification(title, options, id) {
+                var payload = {
+                  id: id,
+                  title: title || '',
+                  body: options.body || '',
+                  channelId: 'default',
+                  schedule: { at: new Date(Date.now() + 1000) }
+                };
+                Capacitor.Plugins.LocalNotifications.schedule({
+                  notifications: [payload]
+                }).then(function(result) {
+                  console.log('✅ schedule() résultat:', JSON.stringify(result));
+                }).catch(function(e) {
+                  console.error('❌ Échec schedule():', JSON.stringify(e));
+                });
+              }
+
+              // Créer le canal une fois
               Capacitor.Plugins.LocalNotifications.createChannel({
                 id: 'default',
                 name: 'Notifications',
@@ -260,32 +312,24 @@ jobs:
               window.Notification = function(title, options) {
                 options = options || {};
                 var id = Math.floor(Math.random() * 2147483647);
-                var payload = {
-                  id: id,
-                  title: title || '',
-                  body: options.body || '',
-                  channelId: 'default',
-                  schedule: { at: new Date(Date.now() + 1000) }
-                };
-                Capacitor.Plugins.LocalNotifications.schedule({
-                  notifications: [payload]
-                }).then(function(result) {
-                  console.log('✅ schedule() résultat:', JSON.stringify(result));
-                }).catch(function(e) {
-                  console.error('❌ Échec schedule():', JSON.stringify(e));
-                });
+                if (permissionStatus === 'granted') {
+                  scheduleNotification(title, options, id);
+                } else if (permissionStatus === 'default') {
+                  // Demander la permission et planifier après
+                  pendingNotifications.push({ title: title, options: options, id: id });
+                  requestPermissionIfNeeded();
+                } else {
+                  console.warn('🔕 Notification non planifiée : permission refusée');
+                }
                 return { title: title, body: options.body, close: function() {} };
               };
+
               window.Notification.requestPermission = function() {
-                if (Capacitor.Plugins.LocalNotifications.requestPermissions) {
-                  return Capacitor.Plugins.LocalNotifications.requestPermissions().then(function(result) {
-                    return (result && result.display === 'granted') ? 'granted' : 'denied';
-                  });
-                }
-                return Promise.resolve('granted');
+                return requestPermissionIfNeeded();
               };
-              window.Notification.permission = 'granted';
-              console.log('🔌 Shim Notification actif');
+
+              window.Notification.permission = permissionStatus;
+              console.log('🔌 Shim Notification actif (permission: ' + permissionStatus + ')');
             }
           })();
           NOTIFEOF
