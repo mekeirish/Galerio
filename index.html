@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Souvenirs Temporels</title>
+  
+  <!-- Liaison du Manifest PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0b1120">
+  
+  <!-- Tailwind & daisyUI -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.10.2/dist/full.min.css" rel="stylesheet" type="text/css" />
+  
+  <!-- Exifr pour la lecture des métadonnées EXIF -->
+  <script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
+
+  <style>
+    /* Configuration Matte Cyber & Glassmorphism */
+    body {
+      background-color: #0b1120;
+      background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0b1120 70%);
+      background-attachment: fixed;
+      font-family: 'Inter', system-ui, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+    
+    .glass-panel {
+      background: rgba(30, 41, 59, 0.4);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+    }
+    
+    /* Scrollbar minimaliste */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
+  </style>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#4b6cb7">
+<link rel="apple-touch-icon" href="icon.png"></head>
+<body class="text-slate-200 min-h-screen pb-20">
+
+  <!-- En-tête -->
+  <header class="glass-panel sticky top-0 z-50 px-4 py-4 flex justify-between items-center mb-6 rounded-b-3xl">
+    <h1 class="text-xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
+      Souvenirs Temporels
+    </h1>
+    <label class="btn btn-sm btn-info btn-outline glass shadow-lg shadow-cyan-500/20 rounded-full">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+      Importer
+      <input type="file" id="fileInput" multiple accept="image/*" class="hidden">
+    </label>
+  </header>
+
+  <main class="px-4 max-w-3xl mx-auto space-y-6">
+    
+    <!-- Indicateur de chargement -->
+    <div id="loader" class="hidden glass-panel rounded-2xl p-6 text-center space-y-3">
+      <span class="loading loading-ring loading-lg text-cyan-400"></span>
+      <p class="text-sm text-cyan-300 animate-pulse font-mono" id="progressText">Analyse temporelle en cours...</p>
+    </div>
+
+    <!-- Modale de comparaison temporelle -->
+    <div id="timeMachine" class="hidden glass-panel rounded-3xl p-5 border border-cyan-500/30 shadow-2xl shadow-cyan-900/20">
+      <div class="flex justify-between items-center mb-4">
+        <div>
+          <h2 class="text-lg font-bold text-white">Voyage Temporel</h2>
+          <p id="timeContext" class="text-xs text-cyan-400 font-mono">Semaine --</p>
+        </div>
+        <button id="closeMachine" class="btn btn-circle btn-xs btn-ghost text-slate-400">✕</button>
+      </div>
+
+      <!-- Photo source -->
+      <div class="relative w-32 h-32 mx-auto rounded-2xl overflow-hidden border-2 border-cyan-500 mb-6 shadow-[0_0_15px_rgba(6,182,212,0.5)]">
+        <img id="sourceImg" class="w-full h-full object-cover" src="" alt="Source">
+        <div class="absolute bottom-0 w-full bg-black/60 backdrop-blur-sm text-center text-[10px] py-1 font-mono text-cyan-300" id="sourceYear"></div>
+      </div>
+
+      <div class="divider before:bg-slate-700 after:bg-slate-700 text-xs text-slate-400">Même semaine, autres années</div>
+
+      <!-- Résultats -->
+      <div id="resultsGrid" class="grid grid-cols-3 gap-3 max-h-64 overflow-y-auto p-1">
+        <!-- Injecté dynamiquement -->
+      </div>
+    </div>
+
+    <!-- Galerie complète -->
+    <div>
+      <h3 class="text-sm font-semibold text-slate-400 mb-3 px-1 uppercase tracking-wider">Toute la galerie (<span id="count">0</span>)</h3>
+      <div id="mainGrid" class="grid grid-cols-3 sm:grid-cols-4 gap-2">
+        <!-- État vide -->
+        <div id="emptyState" class="col-span-full py-12 text-center text-slate-500 glass-panel rounded-2xl border-dashed">
+          Appuyez sur "Importer" pour charger vos photos depuis la galerie locale.
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // 1. Enregistrement du Service Worker pour la PWA
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW ERREUR: ', err));
+      });
+    }
+
+    // 2. Logique applicative
+    let photosDB = [];
+
+    // Calcul de la semaine ISO
+    function getWeekNumber(date) {
+      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    }
+
+    // Traitement des fichiers
+    document.getElementById('fileInput').addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files);
+      if (!files.length) return;
+
+      const loader = document.getElementById('loader');
+      const progressText = document.getElementById('progressText');
+      const emptyState = document.getElementById('emptyState');
+      
+      loader.classList.remove('hidden');
+      if(emptyState) emptyState.remove();
+
+      photosDB = [];
+      let processed = 0;
+
+      for (const file of files) {
+        let date = null;
+        try {
+          const exif = await exifr.parse(file, ['DateTimeOriginal']);
+          if (exif && exif.DateTimeOriginal) date = new Date(exif.DateTimeOriginal);
+        } catch (err) {}
+
+        if (!date || isNaN(date.getTime())) date = new Date(file.lastModified);
+
+        photosDB.push({
+          id: Math.random().toString(36).substr(2, 9),
+          url: URL.createObjectURL(file),
+          year: date.getFullYear(),
+          week: getWeekNumber(date),
+          formattedDate: date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+        });
+
+        processed++;
+        progressText.textContent = `Analyse temporelle... ${processed}/${files.length}`;
+      }
+
+      loader.classList.add('hidden');
+      document.getElementById('count').textContent = photosDB.length;
+      renderGallery();
+    });
+
+    // Affichage de la galerie
+    function renderGallery() {
+      const grid = document.getElementById('mainGrid');
+      grid.innerHTML = photosDB.map(photo => `
+        <div onclick="analyzeTemporalMatch('${photo.id}')" 
+             class="relative aspect-square rounded-xl overflow-hidden glass-panel cursor-pointer active:scale-95 transition-transform">
+          <img src="${photo.url}" class="w-full h-full object-cover" loading="lazy">
+        </div>
+      `).join('');
+    }
+
+    // Déclencheur du voyage temporel
+    function analyzeTemporalMatch(id) {
+      const source = photosDB.find(p => p.id === id);
+      if (!source) return;
+
+      // Cherche les photos de la même semaine mais d'une autre année
+      const matches = photosDB.filter(p => p.week === source.week && p.year !== source.year);
+
+      // Met à jour l'UI
+      document.getElementById('sourceImg').src = source.url;
+      document.getElementById('sourceYear').textContent = source.year;
+      document.getElementById('timeContext').textContent = `Semaine ${source.week}`;
+
+      const resultsGrid = document.getElementById('resultsGrid');
+      
+      if (matches.length === 0) {
+        resultsGrid.innerHTML = `<div class="col-span-full text-center text-xs text-slate-500 py-4">Aucune résonance temporelle trouvée pour cette semaine.</div>`;
+      } else {
+        // Trie par année décroissante
+        matches.sort((a, b) => b.year - a.year);
+        resultsGrid.innerHTML = matches.map(m => `
+          <div class="relative aspect-square rounded-lg overflow-hidden border border-slate-600">
+            <img src="${m.url}" class="w-full h-full object-cover">
+            <div class="absolute bottom-0 w-full bg-slate-900/80 text-center text-[10px] py-0.5 text-cyan-400 font-mono">
+              ${m.year}
+            </div>
+          </div>
+        `).join('');
+      }
+
+      const machine = document.getElementById('timeMachine');
+      machine.classList.remove('hidden');
+      machine.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // Fermeture
+    document.getElementById('closeMachine').addEventListener('click', () => {
+      document.getElementById('timeMachine').classList.add('hidden');
+    });
+  </script>
+
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));}</script>
+</body>
+</html>
